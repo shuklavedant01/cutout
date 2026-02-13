@@ -47,7 +47,7 @@ FLUENCY_MODEL = "xlm-roberta-base"
 # ============================
 # FILE EXTENSIONS
 # ============================
-SUPPORTED_AUDIO_FORMATS = ['.wav', '.mp3', '.m4a', '.flac', '.ogg']
+SUPPORTED_AUDIO_FORMATS = ['.wav', '.mp3', '.m4a', '.flac', '.ogg', '.oga']
 
 # ============================
 # OUTPUT DIRECTORY
