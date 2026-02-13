@@ -246,8 +246,10 @@ def analyze_transcription(json_file_path):
     
     # 2. CALCULATE TIMING
     df['prev_end'] = df['end'].shift(1)
+    df['prev_role'] = df['role'].shift(1)
     df['latency'] = df['start'] - df['prev_end']
     df['next_start'] = df['start'].shift(-1)
+    df['next_role'] = df['role'].shift(-1)  # Track who speaks next
     df['silence_gap'] = df['next_start'] - df['end']
     
     agent_df = df[df['role'] == 'AGENT'].copy()
@@ -263,7 +265,13 @@ def analyze_transcription(json_file_path):
     agent_df['len'] = agent_df['text'].apply(len)
     
     # 4. DETECT CUTOUTS
-    agent_df['is_silence'] = get_outliers(agent_df['silence_gap'], config.Z_SCORE_SILENCE)
+    # IMPORTANT: Only flag silence as cutout if next speaker is also AGENT
+    # If next speaker is HUMAN, the silence is just the human thinking - NOT a cutout!
+    silence_gaps_to_check = agent_df.apply(
+        lambda row: row['silence_gap'] if row['next_role'] == 'AGENT' else 0, 
+        axis=1
+    )
+    agent_df['is_silence'] = get_outliers(silence_gaps_to_check, config.Z_SCORE_SILENCE)
     agent_df['is_grammar'] = get_outliers(agent_df['fluency'], config.Z_SCORE_GRAMMAR)
     
     len_thresh = agent_df['len'].quantile(config.ACK_PERCENTILE)
