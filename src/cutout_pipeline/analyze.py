@@ -262,7 +262,7 @@ def analyze_transcription(json_file_path):
     agent_df['semantic_mag'] = np.linalg.norm(embeddings, axis=1)
     agent_df['len'] = agent_df['text'].apply(len)
     
-    # 4. DETECT CUTOUTS WITH CONFIDENCE LEVELS
+    # 4. DETECT CUTOUTS
     agent_df['is_silence'] = get_outliers(agent_df['silence_gap'], config.Z_SCORE_SILENCE)
     agent_df['is_grammar'] = get_outliers(agent_df['fluency'], config.Z_SCORE_GRAMMAR)
     
@@ -271,61 +271,33 @@ def analyze_transcription(json_file_path):
     sem_thresh = sem_thresh_df['semantic_mag'].quantile(0.25) if len(sem_thresh_df) > 0 else 0
     agent_df['is_ack'] = (agent_df['len'] <= len_thresh) & (agent_df['semantic_mag'] <= sem_thresh)
     
-    # Calculate grammar strength (for confidence levels)
-    if len(agent_df) > 0:
-        grammar_median = agent_df['fluency'].median()
-        agent_df['grammar_severity'] = agent_df['fluency'] - grammar_median
-    else:
-        agent_df['grammar_severity'] = 0
-    
-    # 5. AGGREGATE RESULTS WITH CONFIDENCE
+    # 5. AGGREGATE RESULTS
     cutouts = []
     csv_rows = []
     cutout_durations = []
     
-    for idx, row in agent_df.iterrows():
+    for _, row in agent_df.iterrows():
         issues = []
         dur = 0
-        confidence = None  # 'definite', 'likely', 'maybe'
         
-        # Check if next turn is also AGENT (silence detection only after agent speaks)
-        next_speaker = df.loc[df['start'] > row['end']].iloc[0]['role'] if len(df[df['start'] > row['end']]) > 0 else None
-        
-        # Only flag silence if the NEXT speaker is HUMAN (i.e., agent spoke, then long gap before human)
-        # Don't flag if next speaker is AGENT (human took time to respond - that's normal)
-        if row['is_silence'] and next_speaker == 'HUMAN':
+        if row['is_silence']:
             issues.append(f"Unusual Silence ({row['silence_gap']:.2f}s)")
             dur += row['silence_gap']
-            confidence = 'definite'  # Silence is clear-cut
         
         if row['is_grammar']:
-            # Determine confidence based on how far from median
-            grammar_z = row['grammar_severity'] / (agent_df['fluency'].std() + 0.001)
-            
-            if grammar_z > 3.5:  # Very high grammar score
-                issues.append(f"Grammar Issue - High (Score {row['fluency']:.2f})")
-                confidence = 'definite'
-            elif grammar_z > 2.5:  # Moderate grammar score
-                issues.append(f"Grammar Issue - Medium (Score {row['fluency']:.2f})")
-                confidence = 'likely' if confidence != 'definite' else confidence
-            else:  # Low grammar score
-                issues.append(f"Grammar Issue - Low (Score {row['fluency']:.2f})")
-                confidence = 'maybe' if confidence is None else confidence
-            
+            issues.append(f"Grammar Issue (Score {row['fluency']:.2f})")
             dur += (row['end'] - row['start'])
         
         if row['is_ack']:
             issues.append("Empty Acknowledgment")
             dur += (row['end'] - row['start'])
-            confidence = 'likely' if confidence is None else confidence
         
         if issues:
             cutouts.append({
                 "start": row['start'],
                 "end": row['end'],
                 "text": row['text'],
-                "detected_issues": issues,
-                "confidence": confidence if confidence else 'maybe'
+                "detected_issues": issues
             })
             cutout_durations.append(dur)
         
@@ -336,21 +308,13 @@ def analyze_transcription(json_file_path):
             "text": row['text'],
             "latency_seconds": round(row['latency'], 3),
             "is_cutout": bool(issues),
-            "cutout_confidence": confidence if issues else "",
             "cutout_details": " + ".join(issues) if issues else ""
         })
     
-    # 6. STATISTICS WITH CONFIDENCE BREAKDOWN
-    confidence_counts = {
-        'definite': len([c for c in cutouts if c['confidence'] == 'definite']),
-        'likely': len([c for c in cutouts if c['confidence'] == 'likely']),
-        'maybe': len([c for c in cutouts if c['confidence'] == 'maybe'])
-    }
-    
+    # 6. STATISTICS
     stats = {
         "total_turns": len(agent_df),
         "total_cutouts": len(cutouts),
-        "cutouts_by_confidence": confidence_counts,
         "latency_avg": float(agent_df['latency'].mean()),
         "latency_max": float(agent_df['latency'].max()),
         "latency_p95": float(agent_df['latency'].quantile(0.95)),
@@ -361,10 +325,7 @@ def analyze_transcription(json_file_path):
     print("="*60)
     print(f"📊 RESULTS:")
     print(f"   Turns: {stats['total_turns']}")
-    print(f"   Total Cutouts: {stats['total_cutouts']}")
-    print(f"   - Definite: {confidence_counts['definite']}")
-    print(f"   - Likely: {confidence_counts['likely']}")
-    print(f"   - Maybe: {confidence_counts['maybe']}")
+    print(f"   Cutouts: {stats['total_cutouts']}")
     print(f"   Avg Latency: {stats['latency_avg']:.2f}s")
     print(f"   Total Cutout Duration: {stats['cutout_duration_total']:.2f}s")
     print("="*60)
