@@ -1,0 +1,9 @@
+deepgram-sdk==3.2.7
+argostranslate
+transformers
+sentence-transformers
+scikit-learn
+pandas
+matplotlib
+seaborn
+torch
